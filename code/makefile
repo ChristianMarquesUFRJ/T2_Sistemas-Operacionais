@@ -13,7 +13,7 @@ LD = g++
 
 # Flags de compilação e linkedição
 CFLAGS = -Wall -std=c++11
-LFLAGS = -Wall -std=c++11
+LFLAGS = -Wall -std=c++11 -pthread
 
 # Flags do objeto e executável a serem gerados
 OBJ = main.o
