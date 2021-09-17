@@ -21,6 +21,7 @@
             direction my_direction;
             status my_status = status::waiting;
             int start_position;
+            int end_position;
             int position;
             int id;
 
@@ -31,11 +32,13 @@
             void set_to_rigth(){
                 position = 0;
                 start_position = position;
+                end_position = ROPE_SIZE;
                 my_direction = direction::to_right;
             }
             void set_to_left(){
                 position = ROPE_SIZE;
                 start_position = position;
+                end_position = 0;
                 my_direction = direction::to_left;
             }
     };

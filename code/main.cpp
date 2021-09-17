@@ -135,11 +135,73 @@ void Show_Unrepeated_Baboons(int _id, int _baboon_on_rope, direction _current_ro
         else
             cout << "++" << flush;
 
-        cout << "ID=" << _id << "|C=" << _baboon_on_rope << " |" << flush;
+        cout << "ID=" << setfill('0') << setw(Get_Digits_Number(BABOONS_AMOUNT)) << _id << "|C=" << _baboon_on_rope << " |" << flush;
         Show_Baboons_Informations();
     }
     last_id = _id;
 }
+
+////////////////////////////////////////////////////////////////////////////
+bool Can_Baboon_Use_Rope(int id){
+    bool condA = baboons[id].my_status == status::in_progress;
+    bool condB = current_rope_direction == baboons[id].my_direction;
+    bool condC = baboon_on_rope == 0;
+    bool condD = baboon_on_rope == ROPE_BABOON_LIMIT;
+    
+    if (((not condA) and (not condD) and (condB or condC)) or (condA and condB and (not condC)))
+        return false;
+
+    if (baboons[id].my_direction == direction::to_right)
+        cout << "++" << flush;
+    else
+        cout << "--" << flush;
+    cout << "ID[" << id << "] Esperando" << endl;
+    pthread_cond_wait(&available_rope, &lock);
+    return true;
+}
+
+void Update_Informations(int id){
+    if (current_rope_direction != baboons[id].my_direction){
+        current_rope_direction = baboons[id].my_direction;
+        baboon_on_rope = 0;
+        if (baboons[id].my_direction == direction::to_right)
+            cout << "++" << flush;
+        else
+            cout << "--" << flush;
+        cout << "ID[" << id << "] Novo conjunto de babuinos na corda" << endl;
+    }
+    if (baboons[id].my_status == status::waiting){
+        baboon_on_rope++;
+        baboons[id].my_status = status::in_progress;
+    }
+}
+
+// Movimenta o babuino na corda. Se ele estiver indo para a direta, soma, sendo para a esquerda, subtrai
+void Move_Baboon(int id){
+    if (baboons[id].my_direction == direction::to_right)
+        baboons[id].position++;
+    else
+        baboons[id].position--;
+}
+
+// Caso seja a última posicao do babuíno na corda, envia um signal para indicar que há vaga disponível
+void Send_Rope_Signal_Available(int id){
+    int position = (baboons[id].my_direction == direction::to_right) ? baboons[id].position+1 : baboons[id].position-1;
+
+    if (position == baboons[id].end_position){
+        baboon_on_rope--;
+        baboons[id].my_status = status::done;
+        if (baboons[id].my_direction == direction::to_right)
+            cout << "++" << flush;
+        else
+            cout << "--" << flush;
+        cout << "ID[" << id << "] completou a travessia; Total de babuinos na corda = "<< baboon_on_rope << "\n" << endl;
+        pthread_cond_signal(&available_rope);
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////
+
 
 // Realiza a travessia dos babuínos que estão na esqueda para a direita
 void *Move_To_Right(void *arg) {
@@ -147,37 +209,22 @@ void *Move_To_Right(void *arg) {
 
     for (int i = 0; i < ROPE_SIZE; i++) {
         pthread_mutex_lock(&lock);
-        while (1){
-            bool condA = baboons[id].my_status == status::in_progress;
-            bool condB = current_rope_direction == direction::to_right;
-            bool condC = baboon_on_rope == 0;
-            bool condD = baboon_on_rope == ROPE_BABOON_LIMIT;
-            
-            if (((not condA) and (not condD) and (condB or condC)) or (condA and condB and (not condC)))
-                break;
-            else{
-                cout << "++ID[" << id << "] Esperando" << endl;
-                pthread_cond_wait(&available_rope, &lock);
-            }
-        }
-        if (current_rope_direction != direction::to_right){
-            current_rope_direction = direction::to_right;
-            baboon_on_rope = 0;
-            cout << "++ID[" << id << "] Inicio de nova corda" << endl;
-        }
-        if (baboons[id].my_status == status::waiting){
-            baboon_on_rope++;
-            baboons[id].my_status = status::in_progress;
-        }
-        baboons[id].position++;
+        
+        // Espera até ser possível que o babuíno possa usar a corda para atravessar
+        while (Can_Baboon_Use_Rope(id));
+
+        // Atualiza informações de status do babuíno e quantidade de babuinos e direção do movimento na corda
+        Update_Informations(id);
+
+        // Movimenta o babuíno na corda
+        Move_Baboon(id);
+
+        // Mostra na tela somente o primeiro movimento do babuíno (para não poluir a análise)
         Show_Unrepeated_Baboons(id, baboon_on_rope, current_rope_direction);
     
-        if (i+1 == ROPE_SIZE){
-            baboon_on_rope--;
-            baboons[id].my_status = status::done;
-            cout << "++ID[" << id << "] completo; C="<< baboon_on_rope << "\n" << endl;
-            pthread_cond_signal(&available_rope);
-        }
+        // Caso seja a última posicao do babuíno na corda, envia um signal para indicar que há vaga disponível
+        Send_Rope_Signal_Available(id);
+
         pthread_mutex_unlock(&lock);
     }
 
@@ -190,40 +237,27 @@ void *Move_To_Left(void *arg) {
 
     for (int i = 0; i < ROPE_SIZE; i++) {
         pthread_mutex_lock(&lock);
-        while (1){
-            bool condA = baboons[id].my_status == status::in_progress;
-            bool condB = current_rope_direction == direction::to_left;
-            bool condC = baboon_on_rope == 0;
-            bool condD = baboon_on_rope == ROPE_BABOON_LIMIT;
-            if (((not condA) and (not condD) and (condB or condC)) or (condA and condB and (not condC)))
-                break;
-            else{
-                cout << "--ID[" << id << "] Esperando" << endl;
-                pthread_cond_wait(&available_rope, &lock);
-            }
-        }
-        if (current_rope_direction != direction::to_left){
-            current_rope_direction = direction::to_left;
-            baboon_on_rope = 0;
-            cout << "--ID[" << id << "] Inicio de nova corda" << endl;
-        }
-        if (baboons[id].my_status == status::waiting){
-            baboon_on_rope++;
-            baboons[id].my_status = status::in_progress;
-        }
+        
+        // Espera até ser possível que o babuíno possa usar a corda para atravessar
+        while (Can_Baboon_Use_Rope(id));
+
+        // Atualiza informações de status do babuíno e quantidade de babuinos e direção do movimento na corda
+        Update_Informations(id);
+
+        // Movimenta o babuíno na corda
+        Move_Baboon(id);
+
+        // Mostra na tela somente o primeiro movimento do babuíno (para não poluir a análise)
         Show_Unrepeated_Baboons(id, baboon_on_rope, current_rope_direction);
-        baboons[id].position--;
-       
-        if (i+1 == ROPE_SIZE){
-            baboon_on_rope--;
-            baboons[id].my_status = status::done;
-            cout << "--ID[" << id << "] completo; C="<< baboon_on_rope << "\n" << endl;
-            pthread_cond_signal(&available_rope);
-        }
+    
+        // Caso seja a última posicao do babuíno na corda, envia um signal para indicar que há vaga disponível
+        Send_Rope_Signal_Available(id);
+
         pthread_mutex_unlock(&lock);
     }
 
     pthread_exit(NULL);
+
 }
               
 
