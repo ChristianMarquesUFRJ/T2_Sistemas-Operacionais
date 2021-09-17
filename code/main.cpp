@@ -24,16 +24,22 @@
 ////////////////////////////////////////////////////////////////////////////
 //  RESUMO DA IMPLEMENTAÇÃO
 ////////////////////////////////////////////////////////////////////////////
-// Serão criadas 10 threads, onde cada babuíno será representado por uma thread
-// Cada thread realiza a soma de deslocamento do determinado babuíno
-// Supondo que a corda tem 100 metros, quando chegar nesse valor o babuíno atravessou
-// Existe uma variável de controle para o "direction" (definida por enum) indicando o sentido do babuíno:
-//      * to_left  -> indica que o babuíno em questão está indo da direita para a esquerda
-//      * to_right -> indica que o babuíno em questão está indo da esquerda para a direita
+// Serão criadas N threads, onde cada babuíno será representado por uma thread
+// Cada thread realiza o deslocamento do determinado babuíno:
+//   - Os bauínos na esquerda (posição 0) vão para a direita (posição X), logo, quando posição = X que dizer que o babuíno atravessou
+//   - Os bauínos na direita (posição X) vão para a esquerda (posição 0), logo, quando posição = 0 que dizer que o babuíno atravessou
+// Existe uma variável de controle para o "direction" (definida por enum) indicando o sentido de movimento do babuíno:
+//      * none      -> (só para inicialização) indica que ainda não houve nenhuma travessia
+//      * to_left   -> indica que o babuíno em questão está indo da direita para a esquerda
+//      * to_right  -> indica que o babuíno em questão está indo da esquerda para a direita
+// Existe uma variável de controle para o "status" (definida por enum) indicando onde o babuíno está em relação à travessia:
+//      * waiting       -> indica que o babuíno em questão está esperando pra usar a corda
+//      * in_progress   -> indica que o babuíno em questão está atravessando pela corda
+//      * done          -> indica que o babuíno em questão já atravessou a corda
 // Deste modo, cada thread (babuíno) deverá possuir:
-//      * direction (to_left | to_right)    : sentido de deslocamento na corda
-//      * position   (0-100)                : posição do babuíno na corda
-
+//      * direction (none | to_left | to_right)     : sentido de deslocamento na corda
+//      * position  (0-X)                           : qual a posição do babuíno na corda
+//      * status    (waiting | in_progress | done)  : relação do babuíno em relação à sua travessia
 
 
 ////////////////////////////////////////////////////////////////////////////
@@ -51,25 +57,20 @@ using namespace std;
 #include "baboon.hpp"
 #include "constants_and_types.hpp"
 
+////////////////////////////////////////////////////////////////////////////
+//  VARIÁVEIS GLOBAIS PRINCIPAIS
+////////////////////////////////////////////////////////////////////////////
 baboon baboons[BABOONS_AMOUNT];  
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t available_rope;
 
 ////////////////////////////////////////////////////////////////////////////
-//  FUNÇÕES AUXILIARES
+//  FUNÇÕES AUXILIARES GENÉRICAS
 ////////////////////////////////////////////////////////////////////////////
-
 // A lógica dessa função foi baseada no seguinte site: https://www.bitdegree.org/learn/random-number-generator-cpp
 int Get_Random_Value(){
     // Obtém um número randômico entre min e max
     return (rand() % MAX_RANDOM_VALUE) + MIN_RANDOM_VALUE;
-}
-
-double Calculate_Percent_Complete(int initial_position, int current_position){
-    if (initial_position == 0)
-        return ((current_position)/ROPE_SIZE)*100.0;
-    
-    return ((ROPE_SIZE-current_position)/ROPE_SIZE)*100.0;
 }
 
 // A lógica dessa função foi baseada no seguinte forúm: https://stackoverflow.com/questions/1489830/efficient-way-to-determine-number-of-digits-in-an-integer
@@ -77,14 +78,7 @@ int Get_Digits_Number(int number){
     return ((number > 0) ? (int) log10 ((double) number) + 1 : 1);
 }
 
-int Get_In_Moving_Baboons(){
-    int number = 0;
-    for (int i = 0; i < BABOONS_AMOUNT; i++) 
-        if (baboons[i].my_status == status::in_progress)
-            number++;
-    return number;
-}
-
+// Retorna o caractere printavel dependendo do status recebido
 string get_status(status _status){
     if (_status == status::waiting)
         return "W";
@@ -93,12 +87,16 @@ string get_status(status _status){
     return "D";
 }
 
+// Retorna o caractere printavel dependendo da direção recebida
 string get_direction(direction _direction){
     if (_direction == direction::to_left)
         return "L";
     return "R";
 }
 
+////////////////////////////////////////////////////////////////////////////
+// FUNÇÕES DE EXIBIR INFORMAÇÕES NA TELA
+////////////////////////////////////////////////////////////////////////////
 // Mostra a legenda das informacoes
 void Show_Subtitle(){
     cout << "==================================================================================================================" << endl;
@@ -126,6 +124,7 @@ void Show_Baboons_Informations(){
     cout << endl;
 }
 
+// Mostra na tela somente o primeiro movimento do babuíno (para não poluir a análise)
 void Show_Unrepeated_Baboons(int _id, int _baboon_on_rope, direction _current_rope_direction){
     static int last_id = -1;
     //|0:R,100,D|1:R,070,P|2:L,100,W|3:L,100,W|4:L,100,W|5:L,100,W|6:L,100,W|7:L,100,W|8:L,100,W|9:L,100,W|
@@ -142,7 +141,10 @@ void Show_Unrepeated_Baboons(int _id, int _baboon_on_rope, direction _current_ro
 }
 
 ////////////////////////////////////////////////////////////////////////////
-bool Can_Baboon_Use_Rope(int id){
+// FUNÇÕES AUXILIARES DE GERENCIAMENTO DE ACESSO À CORDA
+////////////////////////////////////////////////////////////////////////////
+// Verifica se o babuíno em questão pode ou não acessar a corda. Retornando false ele pode
+bool Wait_To_Use_Rope(int id){
     bool condA = baboons[id].my_status == status::in_progress;
     bool condB = current_rope_direction == baboons[id].my_direction;
     bool condC = baboon_on_rope == 0;
@@ -160,15 +162,15 @@ bool Can_Baboon_Use_Rope(int id){
     return true;
 }
 
+// Atualiza informações de status do babuíno e quantidade de babuinos e direção do movimento na corda
 void Update_Informations(int id){
     if (current_rope_direction != baboons[id].my_direction){
         current_rope_direction = baboons[id].my_direction;
         baboon_on_rope = 0;
         if (baboons[id].my_direction == direction::to_right)
-            cout << "++" << flush;
+            cout << "++ID[" << id << "] Novo conjunto de babuinos na corda indo para a direita" << endl;
         else
-            cout << "--" << flush;
-        cout << "ID[" << id << "] Novo conjunto de babuinos na corda" << endl;
+            cout << "--ID[" << id << "] Novo conjunto de babuinos na corda indo para a esquerda" << endl;
     }
     if (baboons[id].my_status == status::waiting){
         baboon_on_rope++;
@@ -201,17 +203,17 @@ void Send_Rope_Signal_Available(int id){
 }
 
 ////////////////////////////////////////////////////////////////////////////
-
-
+// FUNÇÃO DE GERENCIAMENTO DE ACESSO À CORDA
+////////////////////////////////////////////////////////////////////////////
 // Realiza a travessia dos babuínos que estão na esqueda para a direita
-void *Move_To_Right(void *arg) {
+void *Manage_Rope_Crossing(void *arg) {
     int id = *((int *) arg); 
 
     for (int i = 0; i < ROPE_SIZE; i++) {
         pthread_mutex_lock(&lock);
         
         // Espera até ser possível que o babuíno possa usar a corda para atravessar
-        while (Can_Baboon_Use_Rope(id));
+        while (Wait_To_Use_Rope(id));
 
         // Atualiza informações de status do babuíno e quantidade de babuinos e direção do movimento na corda
         Update_Informations(id);
@@ -229,35 +231,6 @@ void *Move_To_Right(void *arg) {
     }
 
     pthread_exit(NULL);
-}
-
-// Realiza a travessia dos babuínos que estão na direita para a esquerda
-void *Move_To_Left(void *arg) {
-    int id = *((int *) arg); 
-
-    for (int i = 0; i < ROPE_SIZE; i++) {
-        pthread_mutex_lock(&lock);
-        
-        // Espera até ser possível que o babuíno possa usar a corda para atravessar
-        while (Can_Baboon_Use_Rope(id));
-
-        // Atualiza informações de status do babuíno e quantidade de babuinos e direção do movimento na corda
-        Update_Informations(id);
-
-        // Movimenta o babuíno na corda
-        Move_Baboon(id);
-
-        // Mostra na tela somente o primeiro movimento do babuíno (para não poluir a análise)
-        Show_Unrepeated_Baboons(id, baboon_on_rope, current_rope_direction);
-    
-        // Caso seja a última posicao do babuíno na corda, envia um signal para indicar que há vaga disponível
-        Send_Rope_Signal_Available(id);
-
-        pthread_mutex_unlock(&lock);
-    }
-
-    pthread_exit(NULL);
-
 }
               
 
@@ -266,27 +239,28 @@ void *Move_To_Left(void *arg) {
 ////////////////////////////////////////////////////////////////////////////                                                               
 int main(void) {          
     // Inicializa a semente aleatória
-    //srand((unsigned) time(NULL));
-    srand(123);
+    srand((unsigned) time(NULL));
+    //srand(123);
 
     pthread_cond_init(&available_rope, NULL);
 
     for (int i = 0; i < BABOONS_AMOUNT; i++){
         // Se o valor aleatório for par, o babuíno encontra-se inicialmente na esquerda (querendo ir para a direita)
-        if (Get_Random_Value()%2==0){
+        if (Get_Random_Value()%2==0)
             baboons[i].set_to_rigth();
-            pthread_create(&(baboons[i].my_thread), NULL, Move_To_Right,(void *)(&(baboons[i].id)));
-        }
         // Para o valor ímpar, o babuíno encontra-se inicialmente na direita (querendo ir para a esquerda)
-        else{
+        else
             baboons[i].set_to_left();
-            pthread_create(&(baboons[i].my_thread), NULL, Move_To_Left,(void *)(&(baboons[i].id)));
-        }
+        
+        // Cria os babuínos de um a um
+        pthread_create(&(baboons[i].my_thread), NULL, Manage_Rope_Crossing,(void *)(&(baboons[i].id)));
     }
 
+    // Manda todos os babuínos aguardarem
     for (int i = 0; i < BABOONS_AMOUNT; i++)
         pthread_join(baboons[i].my_thread, NULL);
 
+    // Exibe o resultado final e algumas informações extras
     cout << endl << endl << endl;
     cout << "==================================================================================================================" << endl;
     cout << "CONCLUSAO DA TRAVESSIA DOS BABUINOS (STATUS FINAL ABAIXO)" << endl;
