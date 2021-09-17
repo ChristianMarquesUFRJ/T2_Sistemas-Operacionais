@@ -28,6 +28,11 @@ all: $(EXEC)
 $(EXEC): $(OBJ)
 	$(LD) $(OBJ) -o $(EXEC) $(LFLAGS)
 	make -s clean-objs
+
+sem: semaforo.o
+	$(LD) semaforo.o -o sem $(LFLAGS)
+	rm *.o
+
 clean:
 	rm -f $(OBJ) $(EXEC)
 

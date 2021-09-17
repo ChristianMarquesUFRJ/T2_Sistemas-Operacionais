@@ -1,15 +1,26 @@
+////////////////////////////////////////////////////////////////////////////
+//  Universidade Federal do Rio de Janeiro
+//  Disciplina: Sistemas Operacionais - EEL770
+//  Professor: Rodrigo Souza Couto
+//  Desenvolvedor: Chritian Marques de Oliveira Silva
+//  DRE: 117.214.742
+//  Trabalho 2: Locks e Variáveis de Condição - Problema dos babuínos
+////////////////////////////////////////////////////////////////////////////
+
 #ifndef BABOON
     #define BABOON
 
-    enum class direction{to_left, to_right};
-    enum class status{waiting, in_progress, done};
+    #include <string>
+    #include "constants_and_types.hpp"
+    using namespace std;
     
     class baboon {
         public:
             static int baboons_number;
-            static const int ROPE_SIZE = 5;
             pthread_t my_thread;
             direction my_direction;
+            status my_status = status::waiting;
+            int start_position;
             int position;
             int id;
 
@@ -19,18 +30,13 @@
             }
             void set_to_rigth(){
                 position = 0;
+                start_position = position;
                 my_direction = direction::to_right;
             }
             void set_to_left(){
                 position = ROPE_SIZE;
+                start_position = position;
                 my_direction = direction::to_left;
-            }
-            bool is_completed(){
-                if ((my_direction == direction::to_right) and (position == ROPE_SIZE))
-                    return true;
-                if ((my_direction == direction::to_left) and (position == 0))
-                    return true;
-                return false;
             }
     };
 
